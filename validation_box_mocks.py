@@ -42,9 +42,10 @@ ESS = 700
 # EZmock covariance rescaled from the EZmock box volume (full_shape.box_tools.get_covariance_defaults()['boxsize']) to this one
 # COVARIANCE_TARGET_BOXSIZE = 1733.264146644964  # Mpc/h, Peregrinus volume x5
 COVARIANCE_TARGET_BOXSIZE = 1631.0640095606417  # Mpc/h, Peregrinus volume x6
-# scale cuts of the comet models, which reach larger kmax; every other model takes the fiducial ones of
-# full_shape.tools.propose_fiducial_observable_options (none are proposed for comet)
-COMET_KRANGES = {
+# scale cuts: True for the hard-coded KRANGES below, whatever the theory model; False for the fiducial ones of the theory model
+# (full_shape.tools.propose_fiducial_observable_options: folpsEFT its own, every other model, comet included, the folpsD ones)
+HARDCODED_KRANGES = False
+KRANGES = {
     'mesh2_spectrum': [
         {'ells': 0, 'k': [0.02, 0.35, 0.01]},
         {'ells': 2, 'k': [0.02, 0.30, 0.01]},
@@ -56,12 +57,12 @@ COMET_KRANGES = {
 }
 
 
-def _get_kranges(theory_model, stats=STATS):
-    """Scale cuts to impose, or None for the fiducial ones of the theory model."""
-    if 'comet' not in theory_model:
+def _get_kranges(hardcoded_kranges=HARDCODED_KRANGES, stats=STATS):
+    """Scale cuts to impose: KRANGES with ``hardcoded_kranges``, else None for the fiducial ones of the theory model."""
+    if not hardcoded_kranges:
         return None
     return {
-        stat: [{'ells': item['ells'], 'k': list(item['k'])} for item in COMET_KRANGES[stat]]
+        stat: [{'ells': item['ells'], 'k': list(item['k'])} for item in KRANGES[stat]]
         for stat in stats
     }
 
@@ -79,7 +80,8 @@ def _build_likelihood_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap
                               stats_dir=BOX_STATS_DIR, covariance_stats_dir=EZMOCK_STATS_DIR,
                               theory_model='folpsD', prior_basis='physical_aap', emulator=None,
                               folpsd_damping=FOLPSD_DAMPING,
-                              folpsd_damping_method=FOLPSD_DAMPING_METHOD, sn1=SN1):
+                              folpsd_damping_method=FOLPSD_DAMPING_METHOD, sn1=SN1,
+                              hardcoded_kranges=HARDCODED_KRANGES):
     from clustering_statistics import box_tools as clustering_box_tools
     from full_shape.box_tools import (generate_box_likelihood_options_helper,
                                       get_default_box_mesh3_basis,
@@ -106,7 +108,7 @@ def _build_likelihood_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap
         cosmo=cosmo, hod=hod, los=los,
         version=version, imocks=_parse_imocks(imocks),
         stats_dir=Path(stats_dir),
-        selects=_get_kranges(theory_model, stats=stats),
+        selects=_get_kranges(hardcoded_kranges, stats=stats),
         stat_options=stat_options,
         window=False,
         covariance_stats_dir=Path(covariance_stats_dir),
@@ -143,7 +145,8 @@ def _build_run_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap=ZSNAP,
                        template='direct', sampler='emcee', nchains=1, resume=False, emulator=None,
                        gelman_rubin=GELMAN_RUBIN, ess=ESS,
                        folpsd_damping=FOLPSD_DAMPING,
-                       folpsd_damping_method=FOLPSD_DAMPING_METHOD, sn1=SN1):
+                       folpsd_damping_method=FOLPSD_DAMPING_METHOD, sn1=SN1,
+                       hardcoded_kranges=HARDCODED_KRANGES):
     from full_shape import tools
 
     likelihood_options = _build_likelihood_options(
@@ -152,6 +155,7 @@ def _build_run_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap=ZSNAP,
         stats_dir=stats_dir, covariance_stats_dir=covariance_stats_dir,
         theory_model=theory_model, prior_basis=prior_basis, emulator=emulator,
         folpsd_damping=folpsd_damping, folpsd_damping_method=folpsd_damping_method, sn1=sn1,
+        hardcoded_kranges=hardcoded_kranges,
     )
     options = {
         'likelihoods': [likelihood_options],
@@ -227,6 +231,9 @@ def _get_parser():
                         help=f"FoG damping method for folpsD mesh2 fits. Use 'none' for desilike's None mode. Defaults to {FOLPSD_DAMPING_METHOD}.")
     parser.add_argument('--sn1', action=argparse.BooleanOptionalAction, default=SN1,
                         help=f'Free the isotropic k^2 stochastic term sn1 of the folps power spectrum (--no-sn1: fixed at 0). Defaults to {SN1}.')
+    parser.add_argument('--hardcoded_kranges', action=argparse.BooleanOptionalAction, default=HARDCODED_KRANGES,
+                        help=f'Fit the scale cuts of KRANGES (e.g. the larger kmax of comet) instead of the fiducial ones of the theory model '
+                             f'(--no-hardcoded_kranges). Defaults to {HARDCODED_KRANGES}.')
     parser.add_argument('--cosmo_params', type=str, default='base',
                         choices=COSMO_MODELS,
                         help='Cosmology parameter setup to fit. Defaults to base.')
@@ -273,7 +280,8 @@ def run_fit(actions=('profile',), template='direct', fits_dir=FITS_DIR,
             cosmo_model='base', sampler='emcee', nchains=1, resume=False,
             emulator=None, local_safe_threads=False, gelman_rubin=GELMAN_RUBIN, ess=ESS,
             folpsd_damping=FOLPSD_DAMPING,
-            folpsd_damping_method=FOLPSD_DAMPING_METHOD, sn1=SN1):
+            folpsd_damping_method=FOLPSD_DAMPING_METHOD, sn1=SN1,
+            hardcoded_kranges=HARDCODED_KRANGES):
     # Everything inside this function will be executed on the compute nodes;
     # this function must be self-contained and cannot rely on imports from the outer scope.
     import os
@@ -304,6 +312,7 @@ def run_fit(actions=('profile',), template='direct', fits_dir=FITS_DIR,
         template=template, sampler=sampler, nchains=nchains, resume=resume,
         emulator=emulator, gelman_rubin=gelman_rubin, ess=ess,
         folpsd_damping=folpsd_damping, folpsd_damping_method=folpsd_damping_method, sn1=sn1,
+        hardcoded_kranges=hardcoded_kranges,
     )
     get_fits_fn = functools.partial(get_fits_fn, fits_dir=fits_dir)
     cache_dir = Path(cache_dir)
@@ -338,4 +347,5 @@ if __name__ == '__main__':
         folpsd_damping=args.folpsd_damping,
         folpsd_damping_method=args.folpsd_damping_method,
         sn1=args.sn1,
+        hardcoded_kranges=args.hardcoded_kranges,
     )
