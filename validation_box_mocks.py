@@ -37,6 +37,9 @@ FOLPSD_DAMPING = 'vdg'
 FOLPSD_DAMPING_METHOD = 'tree+loop'
 GELMAN_RUBIN = 1.03
 ESS = 700
+# EZmock covariance rescaled from the EZmock box volume (full_shape.box_tools.get_covariance_defaults()['boxsize']) to this one
+# COVARIANCE_TARGET_BOXSIZE = 1733.264146644964  # Mpc/h, Peregrinus volume x5
+COVARIANCE_TARGET_BOXSIZE = 1631.0640095606417  # Mpc/h, Peregrinus volume x6
 #KRANGES = {
 #    'mesh2_spectrum': [
 #        {'ells': 0, 'k': [0.02, 0.35, 0.01]},
@@ -86,7 +89,7 @@ def _build_likelihood_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap
     from clustering_statistics import box_tools as clustering_box_tools
     from full_shape.box_tools import (generate_box_likelihood_options_helper,
                                       get_default_box_mesh3_basis,
-                                      get_lsstypes_covariance_defaults)
+                                      get_covariance_defaults)
 
     stats = (stats,) if isinstance(stats, str) else tuple(stats)
     folpsd_damping_method = None if folpsd_damping_method == 'none' else folpsd_damping_method
@@ -102,7 +105,7 @@ def _build_likelihood_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap
         {'mesh3_spectrum': {'basis': get_default_box_mesh3_basis(version)}}
         if 'mesh3_spectrum' in stats else {}
     )
-    covariance_defaults = get_lsstypes_covariance_defaults(tracer, stats=stats)
+    covariance_defaults = get_covariance_defaults(tracer, stats=stats)
     covariance_defaults['zsnap'] = zsnap
     likelihood_options = generate_box_likelihood_options_helper(
         tracer=tracer, zsnap=zsnap, stats=stats,
@@ -111,7 +114,7 @@ def _build_likelihood_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap
         stats_dir=Path(stats_dir),
         selects=_get_kranges(),
         stat_options=stat_options,
-        window_mode='none',
+        window=False,
         covariance_stats_dir=Path(covariance_stats_dir),
         covariance_version=None,
         covariance_tracer=covariance_defaults['tracer'],
@@ -119,12 +122,9 @@ def _build_likelihood_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap
         covariance_imocks=covariance_defaults['imock'],
         #covariance_stat_options=covariance_defaults.get('stat_options', {}),
         covariance_stat_options = stat_options,
-        covariance_volume_rescaling={
-            'enabled': True,
-            'source_boxsize_gpch': 6.0,
-            # 'target_boxsize_gpch': 1.733264146644964, # Peregrinus volume x5
-            'target_boxsize_gpch': 1.6310640095606417, # Peregrinus volume x6
-        },
+        # covariance multiplied by the ratio of the EZmock to the fitted volumes
+        covariance_volume_rescaling=(covariance_defaults['boxsize'] / COVARIANCE_TARGET_BOXSIZE)**3,
+        theory_model=theory_model,
         emulator=emulator,
     )
     for observable_options in likelihood_options['observables']:
@@ -294,8 +294,6 @@ def run_fit(actions=('profile',), template='direct', fits_dir=FITS_DIR,
     config.update('jax_enable_x64', True)
     from clustering_statistics import box_tools as clustering_box_tools
     from full_shape import run_fit_from_options, setup_logging
-    # from full_shape.job_scripts.validation_box_mocks import _build_run_options, _plot_profile_best_fit
-    from full_shape.job_scripts.validation_box_mocks import _plot_profile_best_fit
     from full_shape.tools import get_fits_fn
     setup_logging()
     options = _build_run_options(
@@ -316,6 +314,7 @@ def run_fit(actions=('profile',), template='direct', fits_dir=FITS_DIR,
         cache_dir=cache_dir,
     )
     if 'profile' in actions:
+        mpicomm.barrier()  # profiles written by rank 0 before they are read back
         _plot_profile_best_fit(
             options,
             get_stats_fn=clustering_box_tools.get_box_stats_fn,
