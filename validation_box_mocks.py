@@ -42,6 +42,28 @@ ESS = 700
 # EZmock covariance rescaled from the EZmock box volume (full_shape.box_tools.get_covariance_defaults()['boxsize']) to this one
 # COVARIANCE_TARGET_BOXSIZE = 1733.264146644964  # Mpc/h, Peregrinus volume x5
 COVARIANCE_TARGET_BOXSIZE = 1631.0640095606417  # Mpc/h, Peregrinus volume x6
+# scale cuts of the comet models, which reach larger kmax; every other model takes the fiducial ones of
+# full_shape.tools.propose_fiducial_observable_options (none are proposed for comet)
+COMET_KRANGES = {
+    'mesh2_spectrum': [
+        {'ells': 0, 'k': [0.02, 0.35, 0.01]},
+        {'ells': 2, 'k': [0.02, 0.30, 0.01]},
+    ],
+    'mesh3_spectrum': [
+        {'ells': (0, 0, 0), 'k': [0.02, 0.20, 0.01]},
+        {'ells': (2, 0, 2), 'k': [0.02, 0.10, 0.01]},
+    ],
+}
+
+
+def _get_kranges(theory_model, stats=STATS):
+    """Scale cuts to impose, or None for the fiducial ones of the theory model."""
+    if 'comet' not in theory_model:
+        return None
+    return {
+        stat: [{'ells': item['ells'], 'k': list(item['k'])} for item in COMET_KRANGES[stat]]
+        for stat in stats
+    }
 
 
 def _parse_imocks(value):
@@ -84,8 +106,7 @@ def _build_likelihood_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap
         cosmo=cosmo, hod=hod, los=los,
         version=version, imocks=_parse_imocks(imocks),
         stats_dir=Path(stats_dir),
-        # scale cuts: the fiducial ones of full_shape.tools.propose_fiducial_observable_options for theory_model
-        selects=None,
+        selects=_get_kranges(theory_model, stats=stats),
         stat_options=stat_options,
         window=False,
         covariance_stats_dir=Path(covariance_stats_dir),
