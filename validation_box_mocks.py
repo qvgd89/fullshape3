@@ -37,6 +37,11 @@ FOLPSD_DAMPING = 'vdg'
 FOLPSD_DAMPING_METHOD = 'tree+loop'
 # free the isotropic stochastic term sn1 (sn1 Rvir^2 k^2 / nbar) of the folps power spectrum
 SN1 = True
+# Bispectrum stochastic terms (desilike refactor-jax since 2026-10-22, FOLPS and COMET):
+# B_stoch = (1/nbar) sum_i [b1 snb0 + f mu_i^2 sn0] Z1 P(k_i) + sn0b / nbar^2, with sn0 the power spectrum's
+# (one parameter in a joint P + B fit) and sn0b (A_shot) a free constant, N(0, 2) in the physical bases,
+# replacing the former sn0^2 tie. COMET physical bases: NP0 -> sn0, NB0 -> sn0b.
+# The FOLPS bispectrum needs FolpsD >= 0d79af4 (2026-10-22, 9-parameter bispectrum vector with Ashot).
 GELMAN_RUBIN = 1.03
 ESS = 700
 # EZmock covariance rescaled from the EZmock box volume (full_shape.box_tools.get_covariance_defaults()['boxsize']) to this one
@@ -67,6 +72,15 @@ def _get_kranges(hardcoded_kranges=HARDCODED_KRANGES, stats=STATS):
     }
 
 
+def _check_folps_bispectrum():
+    """Fail early if folps predates the bispectrum constant stochastic term Ashot that desilike now passes (sn0b)."""
+    import desilike  # sets FOLPS_BACKEND='jax' before folps is first imported
+    from folps import folps as folps_module
+    if not hasattr(folps_module, 'split_bispectrum_pars'):
+        raise ImportError('desilike passes the FOLPS bispectrum a 9-parameter vector (b1, b2, bs, c1, c2, Bshot, Pshot, Ashot, X_FoG); '
+                          'update FolpsD (pip install -U git+https://github.com/cosmodesi/FolpsD) to a version with Ashot (2026-10-22 or later).')
+
+
 def _parse_imocks(value):
     if value in [None, 'all', '*']:
         return '*'
@@ -88,6 +102,8 @@ def _build_likelihood_options(stats=STATS, tracer=TRACER, version=VERSION, zsnap
                                       get_covariance_defaults)
 
     stats = (stats,) if isinstance(stats, str) else tuple(stats)
+    if 'folps' in theory_model and 'mesh3_spectrum' in stats:
+        _check_folps_bispectrum()
     folpsd_damping_method = None if folpsd_damping_method == 'none' else folpsd_damping_method
     #emulator = theory_model != 'comet' if emulator is None else emulator
     #emulator = dict(name='chebyshev') if emulator else emulator
